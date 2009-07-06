@@ -12,7 +12,6 @@ URL:		http://github.com/pawelz/pynotif/tree/master
 BuildRequires:	rpm-pythonprov
 Requires:	dbus(org.freedesktop.Notifications)
 Requires:	ekg2-plugin-scripting-python >= 0.1.3
-Requires:	python-pynotify
 BuildArch:	noarch
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
