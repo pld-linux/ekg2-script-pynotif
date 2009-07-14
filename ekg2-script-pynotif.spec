@@ -3,7 +3,7 @@ Summary:	Notification script for ekg2
 Summary(pl.UTF-8):	Skrypt programu ekg2 wysyłający powiadomienia
 Name:		ekg2-script-pynotif
 Version:	0
-Release:	0.20090706.1
+Release:	0.20090714.1
 License:	GPL v3
 Group:		Applications/Communications
 # git clone git://github.com/pawelz/pynotif.git
