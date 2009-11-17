@@ -23,6 +23,8 @@ status changes and incoming messages.
 pynotify jest rozszerzeniem programu ekg2, które wysyła dbusowe
 powiadomienia o zmianach statusów i przychodzących wiadomościach.
 
+%prep
+
 %install
 rm -rf $RPM_BUILD_ROOT
 install -d $RPM_BUILD_ROOT%{_datadir}/ekg2/scripts/
