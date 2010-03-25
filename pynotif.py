@@ -26,7 +26,14 @@ import glib
 TIMEOUT_STATUS=3500
 TIMEOUT_MSG=3500
 
-def removeHTML(text):
+def removeTextFormatting(text):
+    """
+    Removes advance text formatting from notifications.
+
+    Converts html reserved characters (&, ", < and >) to xml entities.
+    Removes ANSII color strings.
+    """
+    # Remove html tags
     reg = re.compile("&")
     text = reg.sub("&#38;", text)
     reg = re.compile('"')
@@ -35,9 +42,30 @@ def removeHTML(text):
     text = reg.sub("&#60;", text)
     reg = re.compile(">")
     text = reg.sub("&#62;", text)
+    # Remove terminal color codes
+    reg = re.compile("\[[0-9]+;[0-9]+m")
+    text = reg.sub("", text)
+    reg = re.compile("\[[0-9]+m")
+    text = reg.sub("", text)
+    return text
+
+def parseMeCommand(text, user):
+    """
+    Interpretes /me command as defined in JEP-0245
+
+    If text begins with '/me ', substitute it with '* user '
+    """
+
+    if (text[:4] == "/me "):
+        text = "* " + user + text[3:]
+
     return text
 
 def catchURL(text):
+    """
+    Converts URLs to html "a href" tags, so they will be clickable if
+    notification daemon supports basic html.
+    """
     reg = re.compile("((news|telnet|nttp|file|http|ftp|https)://[^ ]+|www.[^ ]+)")
     if len(reg.findall(text)):
         text = reg.sub(r'<a href="\1">\1</a>', text)
@@ -59,7 +87,38 @@ def transStatus(status):
             'unknown': 'nieznany',
             }[status]
 
+def getUrgency(title, text):
+    """
+    Performs notify:urgency_critical_regexp and notify:urgency_normal_regexp
+    matching on "title&text". "&" character was chosen as separator, because
+    acording to RFC3920, Apendix A, use of this character is forbiden i JID,
+    so it should not apear in title.
+
+    If notify:urgency_critical_regexp matches, returns urgency CRITICAL. If
+    not, tries to match notify:urgency_normal_regexp, on success return
+    urgency NORMAL. Finally return urgency LOW.
+
+    Default values are "^$" wich are never matched, as string always contain
+    at least single "&" character.
+    """
+    
+    message=title+"&"+text
+    
+    urgencyCritical = re.compile(ekg.config["notify:urgency_critical_regexp"])
+    if (urgencyCritical.match(message)):
+        return pynotify.URGENCY_CRITICAL
+    
+    urgencyNormal = re.compile(ekg.config["notify:urgency_normal_regexp"])
+    if (urgencyNormal.match(message)):
+        return pynotify.URGENCY_NORMAL
+    
+    return pynotify.URGENCY_LOW
+
 def displayNotify(title, text, timeout, type):
+    """
+    Sends notification to dbus org.freedesktop.Notifications service using
+    pynotify python library.
+    """
     if not pynotify.init("EkgNotif"):
         ekg.echo("you don't seem to have pynotify installed")
         return 0
@@ -69,7 +128,9 @@ def displayNotify(title, text, timeout, type):
             text = l[1]
             timeout = int(ekg.config["notify:catch_url_timeout"])
     n = pynotify.Notification(title, text, type)
+
     n.set_timeout(timeout)
+    n.set_urgency(getUrgency(title, text))
 
     # Most probably glib.GError is:
     # The name org.freedesktop.Notifications was not provided by any
@@ -88,11 +149,23 @@ def displayNotify(title, text, timeout, type):
     return 1
 
 def notifyStatus(session, uid, status, descr):
+    """
+    Display status change notifications, but first check if status change
+    notifications are enabled, then check if session and uids match
+    ignore_{sessions,uids}_regexp.
+
+    This function is bound to protocol-status handler
+    """
     if ekg.config["notify:status_notify"] == "0":
         return 1
-    regexp = re.compile('^irc:')
-    if regexp.match(session):
-        return 1
+    if (ekg.config["notify:ignore_sessions_regexp"]):
+      regexp = re.compile(ekg.config["notify:ignore_sessions_regexp"])
+      if regexp.match(session):
+          return 1
+    if (ekg.config["notify:ignore_uids_regexp"]):
+      regexp = re.compile(ekg.config["notify:ignore_uids_regexp"])
+      if regexp.match(uid):
+          return 1
     regexp = re.compile('.*' + session + '.*')
     if regexp.match(uid):
         ekg.debug("Zmienil sie status sesji: %s. Nie zostal on zmieniony przez ten program. Sprawdz to, jesli nie zmieniales statusu jakims innym programem" % session)
@@ -112,34 +185,53 @@ def notifyStatus(session, uid, status, descr):
     else:
         nick = user.nickname or user.uid or "Empty"
     s = status or "Empty"
-    s = removeHTML(s)
+    s = removeTextFormatting(s)
     text = "<b>" + nick + "</b> zmienil status na <b>" + s + "</b>"
     if descr:
-        descr = removeHTML(descr)
+        descr = removeTextFormatting(descr)
         text = text + ":\n" + descr + "\n"
     return displayNotify(session, text, TIMEOUT_STATUS, ekg.config["notify:icon_status"])
 
 def notifyMessage(session, uid, type, text, stime, ignore_level):
+    """
+    Display message notifications, but first check if message notifications
+    are enabled, then check if session and uids match
+    ignore_{sessions,uids}_regexp.
+
+    This function is bound to protocol-message handler
+    """
     if ekg.config["notify:message_notify"] == "0":
         return 1
-    regexp = re.compile('^irc:')
-    if regexp.match(session):
-        return 1
-    text = removeHTML(text)
+    if (ekg.config["notify:ignore_sessions_regexp"]):
+      regexp = re.compile(ekg.config["notify:ignore_sessions_regexp"])
+      if regexp.match(session):
+          return 1
+    if (ekg.config["notify:ignore_uids_regexp"]):
+      regexp = re.compile(ekg.config["notify:ignore_uids_regexp"])
+      if regexp.match(uid):
+          return 1
     sesja = ekg.session_get(session)
     try:
         user = sesja.user_get(uid)
     except KeyError:
         ekg.debug("Nie znalazlem uzytkownika %s." % uid)
         user = "Empty"
-    t = time.strftime("%H:%M:%S", time.gmtime(stime))
+    if user == None:
+        user = "Empty"
     if user == "Empty" and ekg.config["notify:message_notify_unknown"] == "0":
         return 1
     if user == "Empty":
         user = uid
     else:
         user = user.nickname
-    title = t + " " + user
+    try:
+        title = user
+    except KeyError:
+        title = uid
+    if (ekg.config["notify:show_timestamps"] == "1"):
+        title = time.strftime("%H:%M:%S", time.localtime(stime)) + " " + title
+    text = removeTextFormatting(text)
+    text = parseMeCommand(text, user)
     if len(text) > 200:
         text = text[0:199] + "... >>>\n\n"
     return displayNotify(title, text, TIMEOUT_MSG, ekg.config["notify:icon_msg"])
@@ -168,6 +260,11 @@ def timeCheck(name, args):
     return 0
 
 def notifyTest(name, args):
+    """
+    Sends test notification.
+
+    This function is bound to notify:send command
+    """
     args = args.split(None, 1)
     if (len(args) == 0):
         title="Test"
@@ -183,11 +280,16 @@ def notifyTest(name, args):
 
 ekg.handler_bind('protocol-status', notifyStatus)
 ekg.handler_bind("protocol-message-received", notifyMessage)
+ekg.variable_add("notify:ignore_sessions_regexp", "^irc:")
+ekg.variable_add("notify:ignore_uids_regexp", "^xmpp:.*@conference\.")
+ekg.variable_add("notify:urgency_critical_regexp", "^$")
+ekg.variable_add("notify:urgency_normal_regexp", "^$")
 ekg.variable_add("notify:icon_status", "dialog-warning")
 ekg.variable_add("notify:icon_msg", "dialog-warning")
 ekg.variable_add("notify:message_timeout", "3500", timeCheck)
 ekg.variable_add("notify:message_notify", "1")
 ekg.variable_add("notify:message_notify_unknown", "1")
+ekg.variable_add("notify:show_timestamps", "1")
 ekg.variable_add("notify:status_timeout", "3500", timeCheck)
 ekg.variable_add("notify:status_notify", "1")
 ekg.variable_add("notify:catch_url", "1")
